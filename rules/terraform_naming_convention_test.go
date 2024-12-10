@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/google/go-cmp/cmp"
 	hcl "github.com/hashicorp/hcl/v2"
 	"github.com/terraform-linters/tflint-plugin-sdk/helper"
 )
@@ -3009,6 +3010,79 @@ check "foo_bar" {
 			}
 
 			helper.AssertIssues(t, test.want, runner.Runner.(*helper.Runner).Issues)
+		})
+	}
+}
+
+func Test_TerraformNamingConventionRule_Resource_AutoFix(t *testing.T) {
+	rule := NewTerraformNamingConventionRule()
+
+	cases := []struct {
+		Name     string
+		Content  string
+		Config   string
+		Expected string
+	}{
+		{
+			Name: "snake_case: camelCase to snake_case",
+			Content: `
+resource "aws_instance" "myInstance" {
+}`,
+			Expected: `
+resource "aws_instance" "my_instance" {
+}
+
+moved {
+  from = aws_instance.myInstance
+  to = aws_instance.my_instance
+}`,
+			Config: `
+rule "terraform_naming_convention" {
+    enabled = true
+}`,
+		},
+		{
+			Name: "mixed_snake_case: kebab-case to Mixed_Snake_Case",
+			Content: `
+resource "aws_instance" "my-instance" {
+}`,
+			Expected: `
+resource "aws_instance" "My_Instance" {
+}
+
+moved {
+  from = aws_instance.my-instance
+  to = aws_instance.My_Instance
+}`,
+			Config: `
+rule "terraform_naming_convention" {
+    enabled = true
+    format = "mixed_snake_case"
+}`,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.Name, func(t *testing.T) {
+			runner := testRunner(t, map[string]string{
+				"resource.tf": tc.Content,
+				".tflint.hcl": tc.Config,
+			})
+
+			err := rule.Check(runner)
+			if err != nil {
+				t.Fatalf("Unexpected error occurred: %s", err)
+			}
+
+			got, err := runner.GetFile("resource.tf")
+			if err != nil {
+				t.Fatalf("Unexpected error occurred: %s", err)
+			}
+			want := tc.Expected
+
+			if diff := cmp.Diff(got, want); diff != "" {
+				t.Errorf("Fixed config mismatch (-got +want):\n%s", diff)
+			}
 		})
 	}
 }
